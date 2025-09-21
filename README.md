@@ -19,11 +19,11 @@
 - ✅ **Checkout System** with email validation
 - ✅ **Order Tracking** by email lookup
 - ✅ **Admin Panel** for code management and statistics
-- ✅ **Multiple Payment Gateway Integration**:
-  - **Stripe** (Primary) - International payment gateway with cards and FPX
-  - **Billplz** (Malaysian) - Local payment gateway with FPX, credit/debit cards
-  - **ToyyibPay** (Malaysian) - Alternative local gateway
-  - **Test Mode** - Development testing without real payments
+- ✅ **Payment Gateway Integration**:
+  - **Stripe** (Active) - International payment gateway with cards and FPX
+  - Configured with live test API keys
+  - Success/Cancel URLs properly configured
+  - Ready for webhook integration
 - ✅ **Webhook Handler** for payment confirmation
 - ✅ **Email Service** for sending activation codes
 - ✅ **Database Schema** with D1 SQLite (Products, Orders, CouponCodes, OrderEvents)
