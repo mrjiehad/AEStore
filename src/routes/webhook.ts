@@ -3,6 +3,7 @@ import { CloudflareBindings } from '../types';
 import { verifyToyyibPaySignature } from '../lib/crypto';
 import { EmailService } from '../lib/email/sendCodes';
 import { initBillplzGateway } from '../lib/gateway/billplz';
+import { initStripeGateway } from '../lib/gateway/stripe';
 
 export const webhookRoutes = new Hono<{ Bindings: CloudflareBindings }>();
 
@@ -391,5 +392,260 @@ webhookRoutes.post('/billplz', async (c) => {
     console.error('Billplz webhook error:', error);
     // Return OK to prevent retries that might cause issues
     return c.text('OK');
+  }
+});
+
+// POST /api/webhook/stripe - Handle Stripe webhook
+webhookRoutes.post('/stripe', async (c) => {
+  try {
+    const { DB, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, RESEND_API_KEY, RESEND_FROM_EMAIL } = c.env;
+    
+    // Get raw body for signature verification
+    const rawBody = await c.req.text();
+    const signature = c.req.header('stripe-signature');
+    
+    if (!signature || !STRIPE_WEBHOOK_SECRET) {
+      console.error('Missing Stripe signature or webhook secret');
+      return c.json({ error: 'Invalid webhook' }, 400);
+    }
+    
+    // Initialize Stripe gateway
+    const stripe = initStripeGateway(c.env);
+    
+    // Parse the event
+    let event;
+    try {
+      event = JSON.parse(rawBody);
+      
+      // Verify signature (basic check for now)
+      if (!stripe.verifyWebhookSignature(rawBody, signature, STRIPE_WEBHOOK_SECRET)) {
+        console.error('Invalid Stripe webhook signature');
+        return c.json({ error: 'Invalid signature' }, 400);
+      }
+    } catch (error) {
+      console.error('Error parsing webhook:', error);
+      return c.json({ error: 'Invalid payload' }, 400);
+    }
+    
+    // Process the webhook event
+    const result = await stripe.processWebhook(event);
+    
+    if (!result.success) {
+      console.error('Stripe webhook processing failed');
+      return c.json({ received: true }); // Still return 200 to prevent retries
+    }
+    
+    // Handle checkout.session.completed event
+    if (result.type === 'checkout.session.completed' && result.sessionId && result.paid) {
+      const sessionId = result.sessionId;
+      const paymentIntentId = result.paymentIntentId;
+      
+      // Find order by session ID
+      const order = await DB.prepare(`
+        SELECT * FROM orders 
+        WHERE gateway_bill_code = ?
+      `).bind(sessionId).first();
+      
+      if (!order) {
+        console.error('Order not found for Stripe session:', sessionId);
+        return c.json({ received: true });
+      }
+      
+      // Check idempotency - if already processed, skip
+      if (order.status === 'paid' && order.gateway_ref) {
+        console.log('Order already processed:', order.order_number);
+        return c.json({ received: true });
+      }
+      
+      // Payment is confirmed as paid
+        // Get product info for code allocation
+        const product = await DB.prepare(`
+          SELECT * FROM products WHERE id = ?
+        `).bind(order.product_id).first();
+        
+        if (!product) {
+          console.error('Product not found:', order.product_id);
+          return c.json({ received: true });
+        }
+        
+        // Allocate codes for the order
+        const codes = await DB.prepare(`
+          UPDATE coupon_codes 
+          SET is_used = true, 
+              used_by_email = ?,
+              order_id = ?,
+              used_at = datetime('now')
+          WHERE product_id = ? 
+            AND is_used = false
+          LIMIT ?
+          RETURNING *
+        `).bind(
+          order.email,
+          order.id,
+          order.product_id,
+          order.quantity
+        ).all();
+        
+        if (codes.results.length < order.quantity) {
+          console.error('Insufficient codes available:', {
+            required: order.quantity,
+            available: codes.results.length
+          });
+          
+          // Update order status to failed
+          await DB.prepare(`
+            UPDATE orders 
+            SET status = 'failed',
+                gateway_ref = ?,
+                updated_at = datetime('now')
+            WHERE id = ?
+          `).bind(paymentIntentId || '', order.id).run();
+          
+          return c.json({ received: true });
+        }
+        
+        // Update order status
+        await DB.prepare(`
+          UPDATE orders 
+          SET status = 'paid',
+              paid_at = datetime('now'),
+              gateway_ref = ?,
+              updated_at = datetime('now')
+          WHERE id = ?
+        `).bind(paymentIntentId || '', order.id).run();
+        
+        // Log payment success event
+        await DB.prepare(`
+          INSERT INTO order_events (order_id, type, payload, created_at)
+          VALUES (?, ?, ?, datetime('now'))
+        `).bind(
+          order.id,
+          'payment_success',
+          JSON.stringify({
+            sessionId: sessionId,
+            paymentIntent: paymentIntentId,
+            amount: result.paymentIntentId ? 'paid' : ''
+          })
+        ).run();
+        
+        // Send codes via email
+        if (RESEND_API_KEY && RESEND_FROM_EMAIL) {
+          try {
+            const emailService = new EmailService(RESEND_API_KEY, RESEND_FROM_EMAIL);
+            await emailService.sendActivationCodes(
+              order.email,
+              order.order_number,
+              codes.results.map(c => c.code),
+              product.title,
+              order.subtotal
+            );
+            
+            // Log email sent event
+            await DB.prepare(`
+              INSERT INTO order_events (order_id, type, payload, created_at)
+              VALUES (?, ?, ?, datetime('now'))
+            `).bind(
+              order.id,
+              'codes_sent',
+              JSON.stringify({ 
+                codes: codes.results.map(c => c.code),
+                email: order.email
+              })
+            ).run();
+            
+          } catch (emailError) {
+            console.error('Failed to send email:', emailError);
+            // Log error but don't fail the webhook
+            await DB.prepare(`
+              INSERT INTO order_events (order_id, type, payload, created_at)
+              VALUES (?, ?, ?, datetime('now'))
+            `).bind(
+              order.id,
+              'email_error',
+              JSON.stringify({ error: emailError.message })
+            ).run();
+          }
+        }
+    }
+    
+    return c.json({ received: true });
+    
+  } catch (error) {
+    console.error('Stripe webhook error:', error);
+    return c.json({ error: 'Webhook processing failed' }, 500);
+  }
+});
+
+// POST /api/webhook/test - Test mode webhook for development
+webhookRoutes.post('/test', async (c) => {
+  try {
+    const { DB } = c.env;
+    const body = await c.req.json();
+    const { order_number, status } = body;
+    
+    // Find order
+    const order = await DB.prepare(`
+      SELECT * FROM orders WHERE order_number = ?
+    `).bind(order_number).first();
+    
+    if (!order) {
+      return c.json({ error: 'Order not found' }, 404);
+    }
+    
+    if (status === 'success') {
+      // Mark order as paid (test mode)
+      await DB.prepare(`
+        UPDATE orders 
+        SET status = 'paid',
+            paid_at = datetime('now'),
+            gateway_ref = 'TEST-PAYMENT',
+            updated_at = datetime('now')
+        WHERE id = ?
+      `).bind(order.id).run();
+      
+      // Allocate test codes
+      const codes = await DB.prepare(`
+        UPDATE coupon_codes 
+        SET is_used = true, 
+            used_by_email = ?,
+            order_id = ?,
+            used_at = datetime('now')
+        WHERE product_id = ? 
+          AND is_used = false
+        LIMIT ?
+        RETURNING *
+      `).bind(
+        order.email,
+        order.id,
+        order.product_id,
+        order.quantity
+      ).all();
+      
+      if (codes.results.length > 0) {
+        console.log('Test mode: Allocated codes:', codes.results.map(c => c.code));
+      } else {
+        console.log('Test mode: No codes available (this is normal in test mode)');
+      }
+      
+      return c.json({ 
+        success: true, 
+        message: 'Test payment processed',
+        codes_allocated: codes.results.length
+      });
+    } else {
+      // Mark as failed
+      await DB.prepare(`
+        UPDATE orders 
+        SET status = 'failed',
+            updated_at = datetime('now')
+        WHERE id = ?
+      `).bind(order.id).run();
+      
+      return c.json({ success: true, message: 'Test payment failed' });
+    }
+    
+  } catch (error) {
+    console.error('Test webhook error:', error);
+    return c.json({ error: 'Test webhook failed' }, 500);
   }
 });

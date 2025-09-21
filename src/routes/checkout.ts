@@ -3,6 +3,7 @@ import { CloudflareBindings, Order } from '../types';
 import { z } from 'zod';
 import { ToyyibPayGateway } from '../lib/gateway/toyyibpay';
 import { initBillplzGateway } from '../lib/gateway/billplz';
+import { initStripeGateway } from '../lib/gateway/stripe';
 import { generateOrderNumber } from '../lib/crypto';
 
 export const checkoutRoutes = new Hono<{ Bindings: CloudflareBindings }>();
@@ -16,7 +17,7 @@ const checkoutSchema = z.object({
   terms_accepted: z.boolean().refine(val => val === true, {
     message: 'You must accept the terms and conditions'
   }),
-  payment_method: z.enum(['billplz', 'toyyibpay']).optional().default('billplz')
+  payment_method: z.enum(['stripe', 'billplz', 'toyyibpay', 'test']).optional().default('stripe')
 });
 
 // POST /api/checkout - Process checkout
@@ -114,11 +115,134 @@ checkoutRoutes.post('/', async (c) => {
     ).run();
     
     // Determine which gateway to use based on user selection and configuration
-    const hasBillplz = c.env.BILLPLZ_API_KEY && c.env.BILLPLZ_COLLECTION_ID;
-    const hasToyyibPay = c.env.TOYYIBPAY_SECRET_KEY && c.env.TOYYIBPAY_CATEGORY_CODE;
+    const hasStripe = c.env.STRIPE_SECRET_KEY && 
+                      !c.env.STRIPE_SECRET_KEY.includes('your_') &&
+                      !c.env.STRIPE_SECRET_KEY.includes('test_key');
+    const hasBillplz = c.env.BILLPLZ_API_KEY && 
+                       c.env.BILLPLZ_COLLECTION_ID && 
+                       !c.env.BILLPLZ_API_KEY.includes('test') &&
+                       !c.env.BILLPLZ_API_KEY.includes('dev');
+    const hasToyyibPay = c.env.TOYYIBPAY_SECRET_KEY && 
+                        c.env.TOYYIBPAY_CATEGORY_CODE &&
+                        !c.env.TOYYIBPAY_SECRET_KEY.includes('test') &&
+                        !c.env.TOYYIBPAY_SECRET_KEY.includes('dev');
     
     // Use selected payment method if available, otherwise fallback
     let useGateway = payment_method;
+    
+    // Check if we have Stripe configured (including test keys)
+    const stripeConfigured = c.env.STRIPE_SECRET_KEY && c.env.STRIPE_SECRET_KEY.startsWith('sk_');
+    
+    // If Stripe is configured, use it as primary
+    if (stripeConfigured && (payment_method === 'stripe' || payment_method === 'test')) {
+      console.log('Using Stripe payment gateway');
+      
+      try {
+        const stripe = initStripeGateway(c.env);
+        
+        const successUrl = `${APP_URL}/success?order=${orderNumber}&session_id={CHECKOUT_SESSION_ID}`;
+        const cancelUrl = `${APP_URL}/checkout?canceled=true`;
+        
+        // Get product details for line items
+        const lineItems = [];
+        for (const item of items) {
+          const product = await DB.prepare(`
+            SELECT * FROM products WHERE id = ?
+          `).bind(item.product_id).first();
+          
+          if (product) {
+            lineItems.push({
+              name: product.title,
+              description: `${product.amount_ae} AECOIN`,
+              amount: Math.round(product.price_now * 100), // Convert to cents
+              quantity: item.quantity,
+            });
+          }
+        }
+        
+        const session = await stripe.createCheckoutSession({
+          orderNumber,
+          email,
+          items: lineItems,
+          successUrl,
+          cancelUrl,
+          metadata: {
+            order_id: orderId.toString(),
+            order_number: orderNumber,
+          }
+        });
+        
+        // Update order with Stripe session info
+        await DB.prepare(`
+          UPDATE orders 
+          SET gateway = 'stripe', 
+              gateway_bill_code = ?,
+              payment_url = ?,
+              updated_at = datetime('now')
+          WHERE id = ?
+        `).bind(session.id, session.url, orderId).run();
+        
+        // Log payment initiated event
+        await DB.prepare(`
+          INSERT INTO order_events (order_id, type, payload, created_at)
+          VALUES (?, ?, ?, datetime('now'))
+        `).bind(
+          orderId,
+          'payment_initiated',
+          JSON.stringify({ 
+            sessionId: session.id, 
+            paymentUrl: session.url,
+            gateway: 'stripe'
+          })
+        ).run();
+        
+        return c.json({
+          success: true,
+          data: {
+            order_number: orderNumber,
+            payment_url: session.url,
+            total: subtotal,
+            gateway: 'stripe',
+            session_id: session.id
+          }
+        });
+        
+      } catch (stripeError: any) {
+        console.error('Stripe error:', stripeError);
+        // Fall back to test mode if Stripe fails
+        useGateway = 'test';
+      }
+    }
+    
+    // If no real payment gateways are configured, use test mode
+    if (!stripeConfigured && !hasBillplz && !hasToyyibPay) {
+      console.log('No payment gateways configured, using test mode');
+      
+      // Create test payment URL
+      const testPaymentUrl = `/test-payment?order=${orderNumber}&amount=${subtotal}`;
+      
+      // Update order with test payment info
+      await DB.prepare(`
+        UPDATE orders 
+        SET gateway = 'test', 
+            gateway_bill_code = ?,
+            payment_url = ?,
+            updated_at = datetime('now')
+        WHERE id = ?
+      `).bind(`TEST-${orderNumber}`, testPaymentUrl, orderId).run();
+      
+      return c.json({
+        success: true,
+        data: {
+          order_number: orderNumber,
+          payment_url: testPaymentUrl,
+          total: subtotal,
+          gateway: 'test',
+          message: 'Test mode - No real payment will be processed'
+        }
+      });
+    }
+    
     if (payment_method === 'billplz' && !hasBillplz) {
       useGateway = 'toyyibpay'; // Fallback to ToyyibPay if Billplz not configured
     } else if (payment_method === 'toyyibpay' && !hasToyyibPay) {

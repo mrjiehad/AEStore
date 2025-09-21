@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Payment - AECOIN Store</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { 
+            background-color: #0D0D0D; 
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="min-h-screen flex items-center justify-center p-4">
+        <div class="bg-[#1A1A1A] rounded-lg p-8 max-w-md w-full">
+            <div class="text-center mb-6">
+                <div class="text-yellow-400 text-6xl mb-4">
+                    <i class="fas fa-flask"></i>
+                </div>
+                <h1 class="text-2xl font-bold mb-2">Test Payment Gateway</h1>
+                <p class="text-gray-400">Simulate payment for testing</p>
+            </div>
+            
+            <div class="bg-[#0D0D0D] rounded-lg p-4 mb-6">
+                <p class="text-sm text-gray-400 mb-1">Order Number:</p>
+                <p class="font-mono text-[#FFD600] font-bold" id="order-number">Loading...</p>
+                <p class="text-sm text-gray-400 mt-3 mb-1">Amount to Pay:</p>
+                <p class="text-2xl font-bold" id="amount">Loading...</p>
+            </div>
+            
+            <div class="space-y-3">
+                <button onclick="simulateSuccess()" class="w-full bg-green-600 text-white py-3 rounded-lg font-bold hover:bg-green-700 transition">
+                    <i class="fas fa-check mr-2"></i>
+                    Simulate Successful Payment
+                </button>
+                <button onclick="simulateFailure()" class="w-full bg-red-600 text-white py-3 rounded-lg font-bold hover:bg-red-700 transition">
+                    <i class="fas fa-times mr-2"></i>
+                    Simulate Failed Payment
+                </button>
+                <button onclick="goBack()" class="w-full bg-gray-700 text-white py-3 rounded-lg font-bold hover:bg-gray-600 transition">
+                    <i class="fas fa-arrow-left mr-2"></i>
+                    Cancel & Go Back
+                </button>
+            </div>
+            
+            <div class="mt-6 p-4 bg-yellow-900/20 border border-yellow-700/50 rounded-lg">
+                <p class="text-sm text-yellow-400">
+                    <i class="fas fa-info-circle mr-2"></i>
+                    This is a test payment page. No real transaction will occur.
+                </p>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
+    <script>
+        // Get URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const orderNumber = urlParams.get('order');
+        const amount = urlParams.get('amount');
+        
+        // Display order info
+        document.getElementById('order-number').textContent = orderNumber || 'Unknown';
+        document.getElementById('amount').textContent = `RM ${amount || '0'}`;
+        
+        async function simulateSuccess() {
+            try {
+                const response = await axios.post('/api/webhook/test', {
+                    order_number: orderNumber,
+                    status: 'success'
+                });
+                
+                if (response.data.success) {
+                    // Show success message
+                    showResult('success', 'Payment Successful!', 'Your test payment has been processed.');
+                } else {
+                    alert('Failed to process test payment');
+                }
+            } catch (error) {
+                console.error('Test payment error:', error);
+                alert('Error processing test payment');
+            }
+        }
+        
+        async function simulateFailure() {
+            try {
+                const response = await axios.post('/api/webhook/test', {
+                    order_number: orderNumber,
+                    status: 'failed'
+                });
+                
+                showResult('failed', 'Payment Failed', 'The test payment was declined.');
+            } catch (error) {
+                console.error('Test payment error:', error);
+            }
+        }
+        
+        function showResult(status, title, message) {
+            const iconClass = status === 'success' ? 'fa-check-circle text-green-500' : 'fa-times-circle text-red-500';
+            const buttonColor = status === 'success' ? 'bg-[#FFD600] text-black hover:bg-yellow-400' : 'bg-red-600 hover:bg-red-700';
+            const buttonText = status === 'success' ? 'View Order' : 'Try Again';
+            const buttonAction = status === 'success' ? '/orders' : '/checkout';
+            
+            document.querySelector('.min-h-screen').innerHTML = `
+                <div class="bg-[#1A1A1A] rounded-lg p-8 max-w-md w-full text-center">
+                    <div class="text-6xl mb-4">
+                        <i class="fas ${iconClass}"></i>
+                    </div>
+                    <h2 class="text-2xl font-bold mb-4">${title}</h2>
+                    <p class="text-gray-400 mb-6">${message}</p>
+                    
+                    <div class="bg-[#0D0D0D] rounded-lg p-4 mb-6">
+                        <p class="text-sm text-gray-400 mb-2">Order Number:</p>
+                        <p class="font-mono text-[#FFD600] font-bold">${orderNumber}</p>
+                        <p class="text-sm text-gray-400 mt-3 mb-2">Amount:</p>
+                        <p class="text-xl font-bold">RM ${amount}</p>
+                    </div>
+                    
+                    <div class="space-y-3">
+                        <a href="${buttonAction}" class="block w-full ${buttonColor} py-3 rounded-lg font-bold transition">
+                            ${buttonText}
+                        </a>
+                        <a href="/" class="block w-full bg-gray-700 text-white py-3 rounded-lg font-bold hover:bg-gray-600 transition">
+                            Back to Home
+                        </a>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function goBack() {
+            window.location.href = '/checkout';
+        }
+    </script>
+</body>
+</html>

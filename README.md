@@ -18,9 +18,11 @@
 - ✅ **Checkout System** with email validation
 - ✅ **Order Tracking** by email lookup
 - ✅ **Admin Panel** for code management and statistics
-- ✅ **Dual Payment Gateway Integration**:
-  - **Billplz** (Primary) - Malaysian payment gateway with FPX, credit/debit cards
-  - **ToyyibPay** (Fallback) - Alternative Malaysian gateway
+- ✅ **Multiple Payment Gateway Integration**:
+  - **Stripe** (Primary) - International payment gateway with cards and FPX
+  - **Billplz** (Malaysian) - Local payment gateway with FPX, credit/debit cards
+  - **ToyyibPay** (Malaysian) - Alternative local gateway
+  - **Test Mode** - Development testing without real payments
 - ✅ **Webhook Handler** for payment confirmation
 - ✅ **Email Service** for sending activation codes
 - ✅ **Database Schema** with D1 SQLite (Products, Orders, CouponCodes, OrderEvents)
@@ -65,7 +67,10 @@
 - `GET /api/orders/:orderNumber?email=` - Get order details
 
 ### Webhook
-- `POST /api/webhook/toyyibpay` - Handle payment gateway callbacks
+- `POST /api/webhook/stripe` - Handle Stripe payment callbacks
+- `POST /api/webhook/billplz` - Handle Billplz payment callbacks
+- `POST /api/webhook/toyyibpay` - Handle ToyyibPay payment callbacks
+- `POST /api/webhook/test` - Test mode webhook for development
 
 ### Admin APIs (Protected)
 - `POST /api/admin/login` - Admin authentication
@@ -133,7 +138,26 @@
 
 ## Payment Gateway Setup
 
-### Billplz Integration (Primary)
+### Stripe Integration (Primary - International)
+1. **Get API Credentials**:
+   - Sign up at https://stripe.com
+   - Go to Developers → API Keys
+   - Copy your Secret Key and Publishable Key
+   
+2. **Setup Webhook**:
+   - Go to Developers → Webhooks
+   - Add endpoint: `https://your-domain.com/api/webhook/stripe`
+   - Select events: `checkout.session.completed`
+   - Copy the webhook signing secret
+   
+3. **Test Cards**:
+   - Success: `4242 4242 4242 4242`
+   - Decline: `4000 0000 0000 0002`
+   - 3D Secure: `4000 0025 0000 3155`
+   
+See full setup guide: [docs/STRIPE_SETUP.md](docs/STRIPE_SETUP.md)
+
+### Billplz Integration (Malaysian)
 1. **Get API Credentials**:
    - Sign up at https://www.billplz.com
    - Go to Settings → Account Settings → API Keys
@@ -177,7 +201,12 @@
 
 ### Environment Variables Required
 ```bash
-# Billplz (Primary Payment Gateway)
+# Stripe (Primary International Payment Gateway)
+STRIPE_SECRET_KEY=sk_test_your_stripe_secret_key
+STRIPE_PUBLISHABLE_KEY=pk_test_your_publishable_key
+STRIPE_WEBHOOK_SECRET=whsec_your_webhook_secret
+
+# Billplz (Malaysian Payment Gateway)
 BILLPLZ_API_KEY=your_billplz_api_secret_key
 BILLPLZ_COLLECTION_ID=your_billplz_collection_id
 BILLPLZ_X_SIGNATURE_KEY=your_x_signature_key_optional

@@ -28,7 +28,7 @@ export interface Order {
   product_id: number;
   quantity: number;
   subtotal: number;
-  gateway: 'toyyibpay' | 'billplz';
+  gateway: 'stripe' | 'toyyibpay' | 'billplz' | 'test';
   status: 'pending' | 'paid' | 'failed';
   gateway_ref?: string;
   gateway_bill_code?: string;
@@ -67,6 +67,9 @@ export interface CloudflareBindings {
   BILLPLZ_COLLECTION_ID: string;
   BILLPLZ_SECRET_KEY: string;
   BILLPLZ_API_URL: string;
+  STRIPE_SECRET_KEY: string;
+  STRIPE_PUBLISHABLE_KEY: string;
+  STRIPE_WEBHOOK_SECRET: string;
   RESEND_API_KEY: string;
   RESEND_FROM_EMAIL: string;
   ADMIN_PASSWORD: string;

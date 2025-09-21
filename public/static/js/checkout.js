@@ -97,17 +97,37 @@ function displayCheckout(cartData) {
                             <p class="text-xs text-gray-400 mt-1">We'll send your codes to this email</p>
                         </div>
                         
+                        <!-- Payment Method Selection -->
                         <div class="mb-6">
                             <label class="block text-sm font-medium mb-2">Payment Method</label>
-                            <div class="space-y-3">
-                                <label class="flex items-center p-3 bg-[#0D0D0D] rounded-lg cursor-pointer hover:border-[#FFD600] border border-gray-700">
-                                    <input type="radio" name="gateway" value="toyyibpay" checked class="mr-3">
-                                    <div>
-                                        <p class="font-medium">ToyyibPay</p>
-                                        <p class="text-xs text-gray-400">FPX Online Banking & Cards</p>
+                            <div class="grid grid-cols-2 gap-3">
+                                <label class="relative">
+                                    <input type="radio" name="payment_method" value="stripe" id="payment-stripe" checked class="peer sr-only">
+                                    <div class="bg-[#0D0D0D] border-2 border-gray-700 rounded-lg p-4 cursor-pointer hover:border-[#FFD600]/50 peer-checked:border-[#FFD600] transition">
+                                        <div class="flex items-center justify-center space-x-2">
+                                            <i class="fab fa-stripe text-2xl text-purple-400"></i>
+                                            <span class="font-semibold">Stripe</span>
+                                        </div>
+                                        <p class="text-xs text-gray-400 mt-2 text-center">Cards & FPX</p>
+                                    </div>
+                                </label>
+                                
+                                <label class="relative">
+                                    <input type="radio" name="payment_method" value="test" id="payment-test" class="peer sr-only">
+                                    <div class="bg-[#0D0D0D] border-2 border-gray-700 rounded-lg p-4 cursor-pointer hover:border-[#FFD600]/50 peer-checked:border-[#FFD600] transition">
+                                        <div class="flex items-center justify-center space-x-2">
+                                            <i class="fas fa-flask text-2xl text-yellow-400"></i>
+                                            <span class="font-semibold">Test Mode</span>
+                                        </div>
+                                        <p class="text-xs text-gray-400 mt-2 text-center">No real payment</p>
                                     </div>
                                 </label>
                             </div>
+                        </div>
+                        
+                        <!-- Dynamic Notice Based on Selection -->
+                        <div id="payment-notice" class="mb-6">
+                            <!-- Will be updated dynamically -->
                         </div>
                         
                         <div class="mb-6">
@@ -120,8 +140,8 @@ function displayCheckout(cartData) {
                         <button type="submit" 
                                 id="checkout-btn"
                                 class="w-full bg-[#FFD600] text-black py-3 rounded-lg font-bold hover:bg-yellow-400 transition">
-                            <i class="fas fa-lock mr-2"></i>
-                            Pay RM ${cartTotal.toFixed(2)}
+                            <i class="fas fa-credit-card mr-2"></i>
+                            Pay with Stripe RM ${cartTotal.toFixed(2)}
                         </button>
                     </form>
                     
@@ -140,6 +160,52 @@ function displayCheckout(cartData) {
     
     // Add form submission handler
     document.getElementById('checkout-form').addEventListener('submit', handleCheckout);
+    
+    // Add payment method change handlers
+    const paymentRadios = document.querySelectorAll('input[name="payment_method"]');
+    paymentRadios.forEach(radio => {
+        radio.addEventListener('change', updatePaymentUI);
+    });
+    
+    // Initialize payment UI
+    updatePaymentUI();
+}
+
+// Update UI based on selected payment method
+function updatePaymentUI() {
+    const selectedMethod = document.querySelector('input[name="payment_method"]:checked').value;
+    const noticeDiv = document.getElementById('payment-notice');
+    const checkoutBtn = document.getElementById('checkout-btn');
+    
+    if (selectedMethod === 'stripe') {
+        noticeDiv.innerHTML = `
+            <div class="bg-purple-900/20 border border-purple-700/50 rounded-lg p-4">
+                <div class="flex items-center text-purple-400">
+                    <i class="fab fa-stripe mr-3 text-xl"></i>
+                    <div>
+                        <p class="font-bold">Stripe Payment Gateway</p>
+                        <p class="text-sm text-purple-400/80">Secure payment via cards or FPX (Malaysian online banking)</p>
+                        <p class="text-xs text-gray-400 mt-1">Test Mode: Use card 4242 4242 4242 4242</p>
+                    </div>
+                </div>
+            </div>
+        `;
+        checkoutBtn.innerHTML = `<i class="fas fa-credit-card mr-2"></i>Pay with Stripe RM ${cartTotal.toFixed(2)}`;
+    } else if (selectedMethod === 'test') {
+        noticeDiv.innerHTML = `
+            <div class="bg-yellow-900/20 border border-yellow-700/50 rounded-lg p-4">
+                <div class="flex items-center text-yellow-400">
+                    <i class="fas fa-flask mr-3 text-xl"></i>
+                    <div>
+                        <p class="font-bold">Test Mode Active</p>
+                        <p class="text-sm text-yellow-400/80">No real payment will be processed</p>
+                        <p class="text-xs text-gray-400 mt-1">For development and testing purposes only</p>
+                    </div>
+                </div>
+            </div>
+        `;
+        checkoutBtn.innerHTML = `<i class="fas fa-flask mr-2"></i>Test Payment RM ${cartTotal.toFixed(2)}`;
+    }
 }
 
 // Handle checkout submission
@@ -148,12 +214,16 @@ async function handleCheckout(e) {
     
     const email = document.getElementById('email').value;
     const terms = document.getElementById('terms').checked;
+    const paymentMethod = document.querySelector('input[name="payment_method"]:checked').value;
     const btn = document.getElementById('checkout-btn');
     
     if (!terms) {
         alert('Please accept the terms and conditions');
         return;
     }
+    
+    // Store original button text
+    const originalBtnText = btn.innerHTML;
     
     // Disable button and show loading
     btn.disabled = true;
@@ -166,26 +236,71 @@ async function handleCheckout(e) {
                 product_id: item.product_id,
                 quantity: item.quantity
             })),
-            terms_accepted: terms
+            terms_accepted: terms,
+            payment_method: paymentMethod
         });
         
         if (response.data.success) {
             // Clear cart
             localStorage.removeItem('aecoin_cart');
             
-            // Redirect to payment gateway
-            window.location.href = response.data.data.payment_url;
+            // Show success message for test mode or redirect for real payment
+            if (paymentMethod === 'test') {
+                // For test mode, show success page
+                showTestSuccess(response.data.data);
+            } else {
+                // Redirect to payment gateway (Stripe)
+                window.location.href = response.data.data.payment_url;
+            }
         } else {
             showError(response.data.error || 'Failed to process checkout');
             btn.disabled = false;
-            btn.innerHTML = `<i class="fas fa-lock mr-2"></i>Pay RM ${cartTotal.toFixed(2)}`;
+            btn.innerHTML = originalBtnText;
         }
     } catch (error) {
         console.error('Checkout error:', error);
         showError('Failed to process payment. Please try again.');
         btn.disabled = false;
-        btn.innerHTML = `<i class="fas fa-lock mr-2"></i>Pay RM ${cartTotal.toFixed(2)}`;
+        btn.innerHTML = originalBtnText;
     }
+}
+
+// Show test mode success
+function showTestSuccess(data) {
+    const app = document.getElementById('app');
+    app.innerHTML = `
+        <div class="min-h-screen flex items-center justify-center p-4">
+            <div class="bg-[#1A1A1A] rounded-lg p-8 max-w-md w-full text-center">
+                <div class="text-green-500 text-6xl mb-4">
+                    <i class="fas fa-check-circle"></i>
+                </div>
+                <h2 class="text-2xl font-bold mb-4">Test Payment Successful!</h2>
+                <p class="text-gray-400 mb-6">Your test order has been created successfully.</p>
+                
+                <div class="bg-[#0D0D0D] rounded-lg p-4 mb-6 text-left">
+                    <p class="text-sm text-gray-400 mb-2">Order Number:</p>
+                    <p class="font-mono text-[#FFD600] font-bold">${data.order_number}</p>
+                    <p class="text-sm text-gray-400 mt-3 mb-2">Total Amount:</p>
+                    <p class="text-xl font-bold">RM ${data.total}</p>
+                    <p class="text-sm text-yellow-400 mt-3">
+                        <i class="fas fa-flask mr-2"></i>
+                        ${data.message || 'Test mode - No real payment processed'}
+                    </p>
+                </div>
+                
+                <div class="space-y-3">
+                    <a href="/orders" class="block w-full bg-[#FFD600] text-black py-3 rounded-lg font-bold hover:bg-yellow-400 transition">
+                        <i class="fas fa-receipt mr-2"></i>
+                        View Orders
+                    </a>
+                    <a href="/" class="block w-full bg-gray-700 text-white py-3 rounded-lg font-bold hover:bg-gray-600 transition">
+                        <i class="fas fa-home mr-2"></i>
+                        Back to Home
+                    </a>
+                </div>
+            </div>
+        </div>
+    `;
 }
 
 // Show error
