@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { CloudflareBindings } from '../types';
 import { verifyToyyibPaySignature } from '../lib/crypto';
 import { EmailService } from '../lib/email/sendCodes';
+import { initBillplzGateway } from '../lib/gateway/billplz';
 
 export const webhookRoutes = new Hono<{ Bindings: CloudflareBindings }>();
 
@@ -172,6 +173,222 @@ webhookRoutes.post('/toyyibpay', async (c) => {
     
   } catch (error) {
     console.error('Webhook error:', error);
+    // Return OK to prevent retries that might cause issues
+    return c.text('OK');
+  }
+});
+
+// POST /api/webhook/billplz - Handle Billplz webhook
+webhookRoutes.post('/billplz', async (c) => {
+  try {
+    const { DB, RESEND_API_KEY, RESEND_FROM_EMAIL } = c.env;
+    
+    // Get webhook data (Billplz sends as form data)
+    const formData = await c.req.formData();
+    
+    // Parse webhook data
+    const webhookData = {
+      id: formData.get('id') as string,
+      collection_id: formData.get('collection_id') as string,
+      paid: formData.get('paid') === 'true',
+      state: formData.get('state') as string,
+      amount: formData.get('amount') as string,
+      paid_amount: formData.get('paid_amount') as string,
+      due_at: formData.get('due_at') as string,
+      email: formData.get('email') as string,
+      mobile: formData.get('mobile') as string,
+      name: formData.get('name') as string,
+      url: formData.get('url') as string,
+      paid_at: formData.get('paid_at') as string,
+      x_signature: formData.get('x_signature') as string,
+      transaction_id: formData.get('transaction_id') as string,
+      transaction_status: formData.get('transaction_status') as string,
+    };
+    
+    // Log webhook received
+    console.log('Billplz webhook received:', {
+      billId: webhookData.id,
+      paid: webhookData.paid,
+      state: webhookData.state,
+      amount: webhookData.amount,
+      transactionId: webhookData.transaction_id
+    });
+    
+    // Initialize Billplz gateway to verify signature
+    const billplz = initBillplzGateway(c.env);
+    
+    // Process webhook
+    const result = await billplz.processWebhook(webhookData);
+    
+    // Find order by bill ID
+    const order = await DB.prepare(`
+      SELECT * FROM orders 
+      WHERE gateway_bill_code = ?
+    `).bind(webhookData.id).first();
+    
+    if (!order) {
+      console.error('Order not found for Billplz webhook:', webhookData.id);
+      return c.text('OK'); // Return OK to prevent retries
+    }
+    
+    // Check idempotency - if already processed, skip
+    if (order.status === 'paid' && order.gateway_ref) {
+      console.log('Order already processed:', order.order_number);
+      return c.text('OK');
+    }
+    
+    // Process based on payment status
+    if (result.paid) {
+      // Payment successful
+      
+      // Get product info for code allocation
+      const product = await DB.prepare(`
+        SELECT * FROM products WHERE id = ?
+      `).bind(order.product_id).first();
+      
+      if (!product) {
+        console.error('Product not found:', order.product_id);
+        return c.text('OK');
+      }
+      
+      // Allocate codes for the order
+      const codes = await DB.prepare(`
+        UPDATE coupon_codes 
+        SET is_used = true, 
+            used_by_email = ?,
+            order_id = ?,
+            used_at = datetime('now')
+        WHERE product_id = ? 
+          AND is_used = false
+        LIMIT ?
+        RETURNING *
+      `).bind(
+        order.email,
+        order.id,
+        order.product_id,
+        order.quantity
+      ).all();
+      
+      if (codes.results.length < order.quantity) {
+        console.error('Insufficient codes available:', {
+          required: order.quantity,
+          available: codes.results.length
+        });
+        
+        // Update order status to failed
+        await DB.prepare(`
+          UPDATE orders 
+          SET status = 'failed',
+              gateway_ref = ?,
+              notes = 'Insufficient codes available',
+              updated_at = datetime('now')
+          WHERE id = ?
+        `).bind(result.transactionId, order.id).run();
+        
+        return c.text('OK');
+      }
+      
+      // Update order status
+      await DB.prepare(`
+        UPDATE orders 
+        SET status = 'paid',
+            paid_at = datetime('now'),
+            gateway_ref = ?,
+            updated_at = datetime('now')
+        WHERE id = ?
+      `).bind(result.transactionId, order.id).run();
+      
+      // Log payment success event
+      await DB.prepare(`
+        INSERT INTO order_events (order_id, type, payload, created_at)
+        VALUES (?, ?, ?, datetime('now'))
+      `).bind(
+        order.id,
+        'payment_success',
+        JSON.stringify({
+          transactionId: result.transactionId,
+          amount: result.amount,
+          billId: result.billId
+        })
+      ).run();
+      
+      // Send codes via email
+      if (RESEND_API_KEY && RESEND_FROM_EMAIL) {
+        try {
+          const emailService = new EmailService(RESEND_API_KEY, RESEND_FROM_EMAIL);
+          await emailService.sendActivationCodes(
+            order.email,
+            order.order_number,
+            codes.results.map(c => c.code),
+            product.title,
+            order.subtotal
+          );
+          
+          // Log email sent event
+          await DB.prepare(`
+            INSERT INTO order_events (order_id, type, payload, created_at)
+            VALUES (?, ?, ?, datetime('now'))
+          `).bind(
+            order.id,
+            'codes_sent',
+            JSON.stringify({ 
+              codes: codes.results.map(c => c.code),
+              email: order.email
+            })
+          ).run();
+          
+        } catch (emailError) {
+          console.error('Failed to send email:', emailError);
+          // Log error but don't fail the webhook
+          await DB.prepare(`
+            INSERT INTO order_events (order_id, type, payload, created_at)
+            VALUES (?, ?, ?, datetime('now'))
+          `).bind(
+            order.id,
+            'email_error',
+            JSON.stringify({ error: emailError.message })
+          ).run();
+        }
+      }
+      
+    } else if (webhookData.state === 'due') {
+      // Payment pending/due
+      await DB.prepare(`
+        UPDATE orders 
+        SET status = 'pending',
+            gateway_ref = ?,
+            updated_at = datetime('now')
+        WHERE id = ?
+      `).bind(result.transactionId, order.id).run();
+      
+    } else {
+      // Payment failed or cancelled
+      await DB.prepare(`
+        UPDATE orders 
+        SET status = 'failed',
+            gateway_ref = ?,
+            updated_at = datetime('now')
+        WHERE id = ?
+      `).bind(result.transactionId, order.id).run();
+      
+      // Log payment failed event
+      await DB.prepare(`
+        INSERT INTO order_events (order_id, type, payload, created_at)
+        VALUES (?, ?, ?, datetime('now'))
+      `).bind(
+        order.id,
+        'payment_failed',
+        JSON.stringify({ 
+          state: webhookData.state,
+          billId: webhookData.id
+        })
+      ).run();
+    }
+    
+    return c.text('OK');
+    
+  } catch (error) {
+    console.error('Billplz webhook error:', error);
     // Return OK to prevent retries that might cause issues
     return c.text('OK');
   }

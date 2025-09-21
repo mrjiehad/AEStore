@@ -18,7 +18,9 @@
 - ✅ **Checkout System** with email validation
 - ✅ **Order Tracking** by email lookup
 - ✅ **Admin Panel** for code management and statistics
-- ✅ **Payment Integration** (ToyyibPay ready, Billplz fallback)
+- ✅ **Dual Payment Gateway Integration**:
+  - **Billplz** (Primary) - Malaysian payment gateway with FPX, credit/debit cards
+  - **ToyyibPay** (Fallback) - Alternative Malaysian gateway
 - ✅ **Webhook Handler** for payment confirmation
 - ✅ **Email Service** for sending activation codes
 - ✅ **Database Schema** with D1 SQLite (Products, Orders, CouponCodes, OrderEvents)
@@ -129,6 +131,40 @@
 - **Emojis**: Gaming-focused emojis throughout (🎮, 🔥, 💎, etc.)
 - **Interactive Elements**: Hover effects, smooth transitions
 
+## Payment Gateway Setup
+
+### Billplz Integration (Primary)
+1. **Get API Credentials**:
+   - Sign up at https://www.billplz.com
+   - Go to Settings → Account Settings → API Keys
+   - Copy your API Secret Key
+
+2. **Create Collection**:
+   - Run setup script: `node scripts/setup-billplz.js`
+   - Or manually create via Billplz dashboard
+   - Copy the Collection ID
+
+3. **Configure Webhooks** (Optional):
+   - Set webhook URL: `https://your-domain.com/api/webhook/billplz`
+   - Enable X-Signature for security
+
+4. **Test in Sandbox**:
+   - Use sandbox API: https://www.billplz-sandbox.com
+   - Set `BILLPLZ_SANDBOX=true` for testing
+
+### ToyyibPay Integration (Fallback)
+1. Sign up at https://toyyibpay.com
+2. Create a category for your store
+3. Get Secret Key and Category Code from dashboard
+4. Configure webhook URL: `https://your-domain.com/api/webhook/toyyibpay`
+
+### Payment Flow
+1. Customer selects payment method at checkout
+2. System creates bill with selected gateway
+3. Customer redirected to payment page (Billplz/ToyyibPay)
+4. After payment, webhook updates order status
+5. Activation codes sent via email automatically
+
 ## Deployment
 
 ### Tech Stack
@@ -141,10 +177,21 @@
 
 ### Environment Variables Required
 ```bash
-TOYYIBPAY_SECRET_KEY=your_key
-TOYYIBPAY_CATEGORY_CODE=your_code
+# Billplz (Primary Payment Gateway)
+BILLPLZ_API_KEY=your_billplz_api_secret_key
+BILLPLZ_COLLECTION_ID=your_billplz_collection_id
+BILLPLZ_X_SIGNATURE_KEY=your_x_signature_key_optional
+BILLPLZ_SANDBOX=false
+
+# ToyyibPay (Fallback Payment Gateway)
+TOYYIBPAY_SECRET_KEY=your_toyyibpay_key
+TOYYIBPAY_CATEGORY_CODE=your_category_code
+
+# Email Service
 RESEND_API_KEY=your_resend_key
 RESEND_FROM_EMAIL=noreply@domain.com
+
+# Admin & Security
 ADMIN_PASSWORD=secure_password
 APP_URL=https://your-domain.com
 WEBHOOK_SECRET=random_secret

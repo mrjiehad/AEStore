@@ -87,6 +87,7 @@ app.get('/checkout', (c) => {
     <div id="app"></div>
     <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
     <script src="/static/js/checkout.js"></script>
+    <script src="/static/js/payment-selector.js"></script>
 </body>
 </html>
   `);
