@@ -17,7 +17,7 @@ const checkoutSchema = z.object({
   terms_accepted: z.boolean().refine(val => val === true, {
     message: 'You must accept the terms and conditions'
   }),
-  payment_method: z.enum(['stripe', 'billplz', 'toyyibpay', 'test']).optional().default('stripe')
+  payment_method: z.enum(['stripe']).optional().default('stripe')
 });
 
 // POST /api/checkout - Process checkout
@@ -133,8 +133,8 @@ checkoutRoutes.post('/', async (c) => {
     // Check if we have Stripe configured (including test keys)
     const stripeConfigured = c.env.STRIPE_SECRET_KEY && c.env.STRIPE_SECRET_KEY.startsWith('sk_');
     
-    // If Stripe is configured, use it as primary
-    if (stripeConfigured && (payment_method === 'stripe' || payment_method === 'test')) {
+    // If Stripe is configured, use it
+    if (stripeConfigured) {
       console.log('Using Stripe payment gateway');
       
       try {
@@ -209,38 +209,20 @@ checkoutRoutes.post('/', async (c) => {
         
       } catch (stripeError: any) {
         console.error('Stripe error:', stripeError);
-        // Fall back to test mode if Stripe fails
-        useGateway = 'test';
+        return c.json({
+          success: false,
+          error: 'Payment gateway error. Please try again later.'
+        }, 500);
       }
     }
     
-    // If no real payment gateways are configured, use test mode
-    if (!stripeConfigured && !hasBillplz && !hasToyyibPay) {
-      console.log('No payment gateways configured, using test mode');
-      
-      // Create test payment URL
-      const testPaymentUrl = `/test-payment?order=${orderNumber}&amount=${subtotal}`;
-      
-      // Update order with test payment info
-      await DB.prepare(`
-        UPDATE orders 
-        SET gateway = 'test', 
-            gateway_bill_code = ?,
-            payment_url = ?,
-            updated_at = datetime('now')
-        WHERE id = ?
-      `).bind(`TEST-${orderNumber}`, testPaymentUrl, orderId).run();
-      
+    // If Stripe is not configured, return error
+    if (!stripeConfigured) {
+      console.error('Stripe payment gateway not configured');
       return c.json({
-        success: true,
-        data: {
-          order_number: orderNumber,
-          payment_url: testPaymentUrl,
-          total: subtotal,
-          gateway: 'test',
-          message: 'Test mode - No real payment will be processed'
-        }
-      });
+        success: false,
+        error: 'Payment gateway not available. Please contact support.'
+      }, 503);
     }
     
     if (payment_method === 'billplz' && !hasBillplz) {

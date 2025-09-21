@@ -28,7 +28,7 @@ export interface Order {
   product_id: number;
   quantity: number;
   subtotal: number;
-  gateway: 'stripe' | 'toyyibpay' | 'billplz' | 'test';
+  gateway: 'stripe' | 'toyyibpay' | 'billplz';
   status: 'pending' | 'paid' | 'failed';
   gateway_ref?: string;
   gateway_bill_code?: string;
