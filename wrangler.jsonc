@@ -1,34 +1,25 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "webapp",
-  "compatibility_date": "2025-09-21",
+  "name": "aecoin-store",
+  "compatibility_date": "2024-01-01",
   "pages_build_output_dir": "./dist",
-  "compatibility_flags": [
-    "nodejs_compat"
+  "compatibility_flags": ["nodejs_compat"],
+  
+  // D1 Database configuration
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "aecoin-db",
+      "database_id": "will-be-created-on-deploy"
+    }
+  ],
+  
+  // KV namespace for rate limiting and session storage
+  "kv_namespaces": [
+    {
+      "binding": "KV",
+      "id": "will-be-created-on-deploy",
+      "preview_id": "will-be-created-on-deploy"
+    }
   ]
-  // "vars": {
-  //   "MY_VAR": "my-variable"
-  // },
-  // "kv_namespaces": [
-  //   {
-  //     "binding": "MY_KV_NAMESPACE",
-  //     "id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-  //   }
-  // ],
-  // "r2_buckets": [
-  //   {
-  //     "binding": "MY_BUCKET",
-  //     "bucket_name": "my-bucket"
-  //   }
-  // ],
-  // "d1_databases": [
-  //   {
-  //     "binding": "MY_DB",
-  //     "database_name": "my-database",
-  //     "database_id": ""
-  //   }
-  // ],
-  // "ai": {
-  //   "binding": "AI"
-  // }
 }

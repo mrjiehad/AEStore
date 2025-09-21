@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Package Test</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-[#0D0D0D] text-white p-8">
+    <h1 class="text-3xl font-bold mb-8">Package Display Test</h1>
+    
+    <div id="test-packages" class="grid grid-cols-5 gap-4 mb-8">
+        <!-- Packages will load here -->
+    </div>
+    
+    <div id="api-status" class="p-4 bg-gray-800 rounded">
+        <h2 class="font-bold mb-2">API Status:</h2>
+        <div id="status-message">Testing API...</div>
+    </div>
+    
+    <script>
+        async function testPackages() {
+            const statusEl = document.getElementById('status-message');
+            const containerEl = document.getElementById('test-packages');
+            
+            try {
+                statusEl.textContent = 'Fetching from /api/products...';
+                const response = await fetch('/api/products');
+                const data = await response.json();
+                
+                statusEl.innerHTML = `<span class="text-green-500">✓ API Success! Found ${data.data.length} products</span>`;
+                
+                // Display packages
+                let html = '';
+                data.data.forEach(product => {
+                    html += `
+                        <div class="bg-gray-900 p-4 rounded border border-yellow-500">
+                            <div class="text-center">
+                                <p class="text-2xl font-bold text-yellow-500">${product.amount_ae}</p>
+                                <p class="text-sm">AECOIN</p>
+                                <p class="text-xl mt-2">RM ${product.price_now}</p>
+                            </div>
+                        </div>
+                    `;
+                });
+                containerEl.innerHTML = html;
+                
+            } catch (error) {
+                statusEl.innerHTML = `<span class="text-red-500">✗ Error: ${error.message}</span>`;
+            }
+        }
+        
+        // Test on load
+        testPackages();
+    </script>
+</body>
+</html>

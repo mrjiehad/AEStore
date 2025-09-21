@@ -1,0 +1,87 @@
+/* Custom styles for AECOIN Store */
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #1A1A1A;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #FFD600;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #FFA500;
+}
+
+/* Selection color */
+::selection {
+    background: #FFD600;
+    color: #0D0D0D;
+}
+
+/* Loading animation */
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}
+
+.loading {
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Glow effect */
+.glow-yellow {
+    box-shadow: 0 0 20px rgba(255, 214, 0, 0.5);
+}
+
+/* Gradient text */
+.gradient-text {
+    background: linear-gradient(135deg, #FFD600 0%, #FFA500 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+/* Card hover effects */
+.card-hover {
+    transition: all 0.3s ease;
+}
+
+.card-hover:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 10px 40px rgba(255, 214, 0, 0.2);
+}
+
+/* Button press effect */
+button:active {
+    transform: scale(0.98);
+}
+
+/* Input focus glow */
+input:focus, textarea:focus, select:focus {
+    box-shadow: 0 0 0 3px rgba(255, 214, 0, 0.1);
+}
+
+/* Notification slide */
+@keyframes slideIn {
+    from {
+        transform: translateX(100%);
+    }
+    to {
+        transform: translateX(0);
+    }
+}
+
+.notification {
+    animation: slideIn 0.3s ease;
+}
