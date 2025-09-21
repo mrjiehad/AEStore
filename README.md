@@ -8,7 +8,8 @@
 
 ## Live URLs
 - **Development**: https://3000-i7p0hupqfybc18c8m5qt8-6532622b.e2b.dev
-- **Production**: https://aecoin-store.pages.dev (after deployment)
+- **Production**: https://aecoin-store.pages.dev (ready for deployment)
+- **Payment Gateway**: ✅ Stripe configured and active
 
 ## Features Completed ✅
 - ✅ **Home Page** with full-page GTA-themed hero slider (4 rotating slides)
